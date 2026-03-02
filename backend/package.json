@@ -1,0 +1,13 @@
+{
+  "name": "ucl-guessr-backend",
+  "version": "1.0.0",
+  "description": "Node.js/Express backend for UCL Guessr",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "uuid": "^9.0.0"
+  }
+}
