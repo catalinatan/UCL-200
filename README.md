@@ -181,7 +181,7 @@ cd ucl-200
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# 3. Start the API (seeds DB automatically on first run)
+# 3. Start the API (creates ucl.db and seeds it automatically on first run)
 uvicorn api.main:app --reload --port 8000
 # → API:       http://localhost:8000
 # → Swagger:   http://localhost:8000/docs
@@ -199,7 +199,6 @@ streamlit run frontend.py
 ucl-200/
 ├── frontend.py              # Streamlit client — UI only, no game logic
 ├── requirements.txt         # Python dependencies
-├── ucl.db                   # SQLite database (auto-created on first run)
 ├── api/
 │   ├── main.py              # FastAPI app — CORS, static files, health, map endpoint
 │   ├── database.py          # SQLAlchemy engine + session factory
