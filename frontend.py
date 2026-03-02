@@ -1,56 +1,77 @@
+import os
+import time
+
+import requests
 import streamlit as st
 import streamlit.components.v1 as components
-import requests
-import time
-import os
 
-BACKEND = "http://localhost:3000"
+BACKEND = "http://localhost:8000"
 
 # ---------------------------------------------------------------------------
 # Session state initialisation
 # ---------------------------------------------------------------------------
 if "session_id" not in st.session_state:
     st.session_state.session_id = None
-if "selected_location" not in st.session_state:
-    st.session_state.selected_location = None
+if "selected_location_id" not in st.session_state:
+    st.session_state.selected_location_id = None  # int or None
 if "show_splash" not in st.session_state:
     st.session_state.show_splash = True
 if "splash_start_time" not in st.session_state:
     st.session_state.splash_start_time = time.time()
-# Cached per-rerun: question options don't reshuffle on every rerun
 if "current_question" not in st.session_state:
     st.session_state.current_question = None
+if "leaderboard_submitted" not in st.session_state:
+    st.session_state.leaderboard_submitted = False
 
 
-def new_game():
-    resp = requests.post(f"{BACKEND}/api/games")
+# ---------------------------------------------------------------------------
+# API helpers
+# ---------------------------------------------------------------------------
+
+def new_game() -> str:
+    resp = requests.post(f"{BACKEND}/sessions")
     resp.raise_for_status()
     return resp.json()["session_id"]
 
 
-def get_game_state(session_id):
-    resp = requests.get(f"{BACKEND}/api/games/{session_id}")
+def get_game_state(session_id: str) -> dict:
+    resp = requests.get(f"{BACKEND}/sessions/{session_id}")
     resp.raise_for_status()
     return resp.json()
 
 
-def get_locations():
-    resp = requests.get(f"{BACKEND}/api/locations")
+def get_locations() -> list[dict]:
+    resp = requests.get(f"{BACKEND}/locations")
     resp.raise_for_status()
     return resp.json()
 
 
-def get_question(location_key):
-    resp = requests.get(f"{BACKEND}/api/locations/{requests.utils.quote(location_key)}/question")
+def get_question(location_id: int) -> dict:
+    resp = requests.get(f"{BACKEND}/questions", params={"location_id": location_id})
     resp.raise_for_status()
     return resp.json()
 
 
-def submit_answer(session_id, location_key, answer):
+def submit_answer(session_id: str, location_id: int, answer: str) -> dict:
     resp = requests.post(
-        f"{BACKEND}/api/games/{session_id}/answer",
-        json={"location_key": location_key, "answer": answer},
+        f"{BACKEND}/sessions/{session_id}/answers",
+        json={"location_id": location_id, "answer": answer},
     )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def submit_leaderboard(player_name: str, session_id: str) -> dict:
+    resp = requests.post(
+        f"{BACKEND}/leaderboard",
+        json={"player_name": player_name, "session_id": session_id},
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_leaderboard(limit: int = 5) -> list[dict]:
+    resp = requests.get(f"{BACKEND}/leaderboard", params={"limit": limit})
     resp.raise_for_status()
     return resp.json()
 
@@ -158,12 +179,40 @@ if game_state["is_over"]:
             unsafe_allow_html=True,
         )
 
+        # Leaderboard submission
+        st.markdown("---")
+        if not st.session_state.leaderboard_submitted:
+            st.subheader("🏅 Submit to Leaderboard")
+            player_name = st.text_input("Your name:", max_chars=30, key="player_name_input")
+            if st.button("Submit Score", use_container_width=True) and player_name.strip():
+                result = submit_leaderboard(player_name.strip(), session_id)
+                st.session_state.leaderboard_submitted = True
+                st.success(f"Submitted! You're ranked #{result['rank']} on the leaderboard.")
+                st.rerun()
+        else:
+            st.success("Score submitted to leaderboard!")
+
+        # Top 5 leaderboard
+        st.subheader("🏆 Top 5")
+        top_entries = get_leaderboard(limit=5)
+        if top_entries:
+            for entry in top_entries:
+                medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+                medal = medals.get(entry["rank"], f"#{entry['rank']}")
+                st.markdown(
+                    f"{medal} **{entry['player_name']}** — "
+                    f"{entry['score']}/{entry['total']} ({entry['accuracy_pct']}%)"
+                )
+        else:
+            st.info("No scores yet — be the first!")
+
     _, col_btn, _ = st.columns([1, 1, 1])
     with col_btn:
         if st.button("🔄 Play Again", use_container_width=True):
             st.session_state.session_id = new_game()
-            st.session_state.selected_location = None
+            st.session_state.selected_location_id = None
             st.session_state.current_question = None
+            st.session_state.leaderboard_submitted = False
             st.session_state.show_splash = True
             st.session_state.splash_start_time = time.time()
             st.rerun()
@@ -191,10 +240,10 @@ with col_timer:
         st.info("⏱️ Timer: Ready")
 
 with col_score:
-    st.metric("Score", f"{game_state['score']}/{len(game_state['answered_locations'])}")
+    st.metric("Score", f"{game_state['score']}/{len(game_state['answered_location_ids'])}")
 
 with col_progress:
-    st.metric("Progress", f"{len(game_state['answered_locations'])}/{game_state['total']}")
+    st.metric("Progress", f"{len(game_state['answered_location_ids'])}/{game_state['total']}")
 
 with col_refresh:
     if st.button("🔄 Refresh"):
@@ -204,47 +253,55 @@ with col_refresh:
 # Map + trivia panel
 # ---------------------------------------------------------------------------
 locations = get_locations()
-location_keys = [loc["key"] for loc in locations]
+# Build lookup maps: id → location dict, key → id
+id_to_loc = {loc["id"]: loc for loc in locations}
+key_to_id = {loc["key"]: loc["id"] for loc in locations}
 
 col_map, col_trivia = st.columns([2, 1])
 
 with col_map:
     st.subheader("Map")
-    selected_param = st.session_state.selected_location or ""
-    map_url = f"{BACKEND}/api/map?selected={requests.utils.quote(selected_param)}"
+    selected_key = ""
+    if st.session_state.selected_location_id:
+        loc = id_to_loc.get(st.session_state.selected_location_id)
+        selected_key = loc["key"] if loc else ""
+    map_url = f"{BACKEND}/map?selected={requests.utils.quote(selected_key)}"
     map_html = requests.get(map_url).text
     components.html(map_html, height=500)
 
 with col_trivia:
     st.subheader("Trivia")
 
-    dropdown_options = [""] + location_keys
-    current_index = (
-        dropdown_options.index(st.session_state.selected_location)
-        if st.session_state.selected_location in dropdown_options
-        else 0
-    )
+    # Dropdown shows human-readable keys; internally we track by ID
+    dropdown_options = [""] + [loc["key"] for loc in locations]
+    current_key = ""
+    if st.session_state.selected_location_id:
+        loc = id_to_loc.get(st.session_state.selected_location_id)
+        current_key = loc["key"] if loc else ""
 
-    selected = st.selectbox(
+    current_index = dropdown_options.index(current_key) if current_key in dropdown_options else 0
+
+    selected_key = st.selectbox(
         "Select a location for trivia:",
         dropdown_options,
         index=current_index,
         key="location_dropdown",
     )
 
-    if selected != st.session_state.selected_location:
-        st.session_state.selected_location = selected or None
+    # Update selected_location_id when dropdown changes
+    new_id = key_to_id.get(selected_key) if selected_key else None
+    if new_id != st.session_state.selected_location_id:
+        st.session_state.selected_location_id = new_id
         st.session_state.current_question = None
         st.rerun()
 
-    if not st.session_state.selected_location:
+    if not st.session_state.selected_location_id:
         st.info("👆 Select a location from the dropdown to start the trivia!")
     else:
-        location_key = st.session_state.selected_location
-        already_answered = location_key in game_state["answered_locations"]
+        location_id = st.session_state.selected_location_id
+        already_answered = location_id in game_state["answered_location_ids"]
 
-        # Show building image
-        loc_data = next((l for l in locations if l["key"] == location_key), None)
+        loc_data = id_to_loc.get(location_id)
         if loc_data:
             img_path = loc_data["img_path"]
             if os.path.exists(img_path):
@@ -253,16 +310,16 @@ with col_trivia:
         if already_answered:
             st.info("✅ You've already answered this one. Select another building!")
             if st.button("Try Another Location"):
-                st.session_state.selected_location = None
+                st.session_state.selected_location_id = None
                 st.session_state.current_question = None
                 st.rerun()
         else:
-            # Fetch and cache question (avoid reshuffling on every rerun)
+            # Cache question to avoid reshuffling on every rerun
             if (
                 st.session_state.current_question is None
-                or st.session_state.current_question["key"] != location_key
+                or st.session_state.current_question["location_id"] != location_id
             ):
-                st.session_state.current_question = get_question(location_key)
+                st.session_state.current_question = get_question(location_id)
 
             q = st.session_state.current_question
             st.write(f"**{q['question']}**")
@@ -272,7 +329,7 @@ with col_trivia:
             options = q["options"]
 
             def make_answer_handler(opt):
-                result = submit_answer(session_id, location_key, opt)
+                result = submit_answer(session_id, location_id, opt)
                 if result["correct"]:
                     st.success("✅ Correct!")
                 else:
@@ -281,13 +338,13 @@ with col_trivia:
                 st.rerun()
 
             with col_a:
-                if len(options) > 0 and st.button(f"A) {options[0]}", key=f"opt0_{location_key}"):
+                if len(options) > 0 and st.button(f"A) {options[0]}", key=f"opt0_{location_id}"):
                     make_answer_handler(options[0])
-                if len(options) > 2 and st.button(f"C) {options[2]}", key=f"opt2_{location_key}"):
+                if len(options) > 2 and st.button(f"C) {options[2]}", key=f"opt2_{location_id}"):
                     make_answer_handler(options[2])
 
             with col_b:
-                if len(options) > 1 and st.button(f"B) {options[1]}", key=f"opt1_{location_key}"):
+                if len(options) > 1 and st.button(f"B) {options[1]}", key=f"opt1_{location_id}"):
                     make_answer_handler(options[1])
-                if len(options) > 3 and st.button(f"D) {options[3]}", key=f"opt3_{location_key}"):
+                if len(options) > 3 and st.button(f"D) {options[3]}", key=f"opt3_{location_id}"):
                     make_answer_handler(options[3])

@@ -1,2 +1,6 @@
 node_modules/
 *.log
+.venv/
+*.db
+__pycache__/
+.conda/
