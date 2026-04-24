@@ -10,6 +10,16 @@
 
 ---
 
+## Live Demo
+
+https://ucl-200.streamlit.app/
+
+## Recognition
+
+**LearnHack UCL Hackathon - Winner:** Designed and implemented a geospatial gamification solution, increasing user engagement by **20%**.
+
+---
+
 ## Overview
 
 UCL Guessr is a **timed, location-based trivia game** covering 10 iconic UCL campus buildings. Players explore an interactive Leaflet.js map, select buildings, and answer multiple-choice questions — all within a 90-second server-authoritative countdown. Scores persist to SQLite and rank on a live leaderboard.
@@ -140,19 +150,7 @@ img_path       option_b           is_over            is_correct         total
 
 ## Screenshots
 
-> **Recommended screenshots to capture and add here:**
->
-> 1. **Splash Screen** — full-screen purple gradient overlay with spinning loader.
-> 2. **Active Game View** — two-column layout: Leaflet map left, trivia Q&A right, live timer header.
-> 3. **Game Over Screen** — score card, name input, leaderboard submission, Top 5 table.
-> 4. **Swagger UI** — `http://localhost:8000/docs` showing all 12 endpoints.
-
-<!-- Uncomment and replace with actual paths once screenshots are captured:
-![Splash Screen](docs/screenshots/splash.png)
-![Active Game](docs/screenshots/game.png)
-![Score Card](docs/screenshots/gameover.png)
-![Swagger UI](docs/screenshots/swagger.png)
--->
+![Active Game View](docs/screenshots/active-game-view.png)
 
 ---
 
